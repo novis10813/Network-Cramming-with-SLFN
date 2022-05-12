@@ -22,7 +22,7 @@ class CustomDataset(Dataset):
         
         # convert to tensors
         self.X = torch.tensor(X, dtype=torch.float32, device=device)
-        self.y = torch.tensor(y, dtype=torch.float32, device=device)
+        self.y = torch.tensor(y, device=device)
     
     def __len__(self):
         return len(self.y)

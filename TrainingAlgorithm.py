@@ -48,6 +48,8 @@ def train(train_loader=None, val_loader=None, model=None, epochs=None, device=No
         valid_acc = sum(valid_accs) / len(valid_accs)
         
         print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+    
+    return model
 
 
 # Universal training process
@@ -306,7 +308,6 @@ class TrainingAlgo:
                             model.load_state_dict(previous_model_params)
                             stop_training = True
                             print(f'max loss:{max_train_loss} > threshold{loss_threshold}, stop training.')
-                            SLFN = 'Acceptable'
                             break
                     
                     if optimizer.param_groups[0]['lr'] > eta_threshold:
@@ -317,7 +318,6 @@ class TrainingAlgo:
                         stop_training = True
                         model.load_state_dict(previous_model_params)
                         print('learning <= threshold, stop training.')
-                        SLFN = 'Acceptable'
                         break
                 
                 model.eval()
@@ -345,15 +345,14 @@ class TrainingAlgo:
                     
                     if epoch+1 == epochs:
                         print(f'Already trained {epochs} epochs, acceptable')
-                        SLFN = 'Acceptable'
-                        return SLFN
+                        return model
                 
                 if stop_training:
-                    return SLFN
+                    return model
 
         except UnboundLocalError:
             print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
-            return 'Error'
+            return None
         
     def multiclass_weight_tuning(self,
                                 epochs:int=None,
@@ -399,12 +398,12 @@ class TrainingAlgo:
                     train_acc = sum(train_accs) / len(train_accs)
                     
                     if train_loss < previous_train_loss:
-                        optimizer.param_groups[0]['lr'] *= 1.2
+                        optimizer.param_groups[0]['lr'] *= 1.1
                         previous_train_loss = train_loss
                         break
                     
                     if optimizer.param_groups[0]['lr'] > eta_threshold:
-                        optimizer.param_groups[0]['lr'] *= 0.8
+                        optimizer.param_groups[0]['lr'] *= 0.7
                         model.load_state_dict(previous_model_params)
                     
                     else:
@@ -439,18 +438,18 @@ class TrainingAlgo:
                     if epoch+1 == epochs:
                         print(f'Already trained {epochs} epochs, unacceptable')
                         SLFN = 'Unacceptable'
-                        return SLFN
+                        return SLFN, model
                 
                 if stop_training:
-                    return SLFN
+                    return SLFN, model
                 
                 if max_train_loss < loss_threshold:
                     SLFN = 'Acceptable'
-                    return SLFN
+                    return SLFN, model
                 
         except UnboundLocalError:
                 print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
-                return 'Error'
+                return 'Error', None
     
     def _binary_acc(self, y_pred, y_true):
         y_pred_tag = torch.round(torch.sigmoid(y_pred))
