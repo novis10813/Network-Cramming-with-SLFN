@@ -2,7 +2,7 @@ import pandas as pd
 import torch
 import numpy as np
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from torch.utils.data.sampler import SubsetRandomSampler
 from sklearn.preprocessing import StandardScaler
 
@@ -22,7 +22,7 @@ class CustomDataset(Dataset):
         
         # convert to tensors
         self.X = torch.tensor(X, dtype=torch.float32, device=device)
-        self.y = torch.tensor(y, device=device)
+        self.y = torch.tensor(y, dtype=torch.float32, device=device)
     
     def __len__(self):
         return len(self.y)
@@ -31,7 +31,7 @@ class CustomDataset(Dataset):
         return self.X[index], self.y[index]
 
 
-def create_dataloader(datapath='train_all_0.csv', device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+def create_dataloader(datapath='train_all_0.csv', batch_size=None, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     dataset = CustomDataset(datapath, device)
 
     # create data indices for train val split
@@ -45,7 +45,14 @@ def create_dataloader(datapath='train_all_0.csv', device=torch.device('cuda' if 
     val_sampler = SubsetRandomSampler(val_indices)
 
     # create data loader
-    train_loader = DataLoader(dataset, batch_size=16, sampler=train_sampler)
-    val_loader = DataLoader(dataset, batch_size=16, sampler=val_sampler)
+    train_loader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
+    val_loader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     
     return train_loader, val_loader
+
+
+def LTS_dataloader(dataset, index, batch_size):
+    new_dataset = Subset(dataset, index)
+    new_dataloader = DataLoader(new_dataset, batch_size)
+    
+    return new_dataloader

@@ -21,7 +21,7 @@ class TwoLayerNN(nn.Module):
             self.bn = nn.Identity()
         
     def forward(self, inputs):
-        x = self.layer_1(inputs)
+        x = torch.relu(self.layer_1(inputs))
         x = self.bn(x)
         x = self.dropout(x)
         x = self.layer_out(x)
@@ -57,3 +57,16 @@ class TwoLayerNN(nn.Module):
     #     # initialize tensor with wanted size
     #     hl_input = torch.zeros([current.shape[0], 1])
     #     nn.init.xavier_uniform_(hl_input, gain=nn.init.calculate_gain('relu'))
+
+
+class LinearRegression(nn.Module):
+    
+    def __init__(self, input_dim, output_dim):
+        super(LinearRegression, self).__init__()
+        
+        # define layers
+        self.linear = nn.Linear(input_dim, output_dim)
+        
+    def forward(self, x):
+    
+        return self.linear(x)

@@ -1,9 +1,19 @@
 import torch
 import itertools
 
+from DataPreprocess import LTS_dataloader
 
 # Basic training pipeline
-def train(train_loader=None, val_loader=None, model=None, epochs=None, device=None, criterion=None, optimizer=None):
+def train(train_loader=None, val_loader=None, model=None, epochs=None, device=None, criterion=None, optimizer=None, binary=True):
+    
+    def binary_acc(y_pred, y_true):
+        y_pred_tag = torch.round(torch.sigmoid(y_pred))
+        correct_result_sum = (y_pred_tag == y_true).sum().float()
+        acc = correct_result_sum / y_true.shape[0]
+        
+        return acc
+    
+    
     for epoch in range(epochs):
         
         model.train()
@@ -15,13 +25,23 @@ def train(train_loader=None, val_loader=None, model=None, epochs=None, device=No
             x, y = batch
             
             logits = model(x.to(device))
-            loss = criterion(logits, y.to(device))
+            
+            if binary:
+                loss = criterion(logits, y.to(device).unsqueeze(1))
+                acc = binary_acc(logits, y.to(device).unsqueeze(1))
+            else:
+                loss = criterion(logits, y.to(device))
+                acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
             
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
-            acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
+            # if binary:
+            #     acc = binary_acc(logits, y.to(device).unsqueeze(1))
+            # else:
+            #     acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
+            
             train_loss.append(loss.item())
             train_accs.append(acc)
         
@@ -34,12 +54,15 @@ def train(train_loader=None, val_loader=None, model=None, epochs=None, device=No
         valid_accs = []
         
         for batch in val_loader:
-            imgs, labels = batch
+            x, y = batch
             
             with torch.no_grad():
-                logits = model(imgs.to(device))
+                logits = model(x.to(device))
                 
-                acc = (logits.argmax(dim=-1) == labels.to(device)).float().mean()
+                if binary:
+                    acc = binary_acc(logits, y.to(device).unsqueeze(1))
+                else:
+                    acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
                 
                 valid_loss.append(loss.item())
                 valid_accs.append(acc)
@@ -219,7 +242,8 @@ class TrainingAlgo:
                  train_loader=None,
                  val_loader=None,
                  criterion=None,
-                 device=None):
+                 device=None,
+                 binary:bool=True):
         '''
         Args:
             train_loader: Pytorch trainloader object.
@@ -231,6 +255,7 @@ class TrainingAlgo:
         self.val_loader = val_loader
         self.criterion = criterion
         self.device=device
+        self.binary = binary
     
     def multiclass_regularization(self,
                                 epochs:int=None,
@@ -271,7 +296,11 @@ class TrainingAlgo:
                         x, y = batch
                         
                         logits = model(x)
-                        loss = self.criterion(logits, y.to(torch.long))
+                        
+                        if self.binary:
+                            loss = self.criterion(logits, y.unsqueeze(1))
+                        else:
+                            loss = self.criterion(logits, y.to(torch.long))
                         
                         # L1 regularization with normalized l1
                         if l1_lambda is not None:
@@ -289,7 +318,10 @@ class TrainingAlgo:
                         loss.backward()
                         optimizer.step()
                         
-                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        if self.binary:
+                            acc = self._binary_acc(logits, y.unsqueeze(1))
+                        else:
+                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
                         
                         train_loss.append(loss.item())
                         train_accs.append(acc)
@@ -330,7 +362,11 @@ class TrainingAlgo:
                     with torch.no_grad():
                         logits = model(x)
                         
-                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        if self.binary:
+                            acc = self._binary_acc(logits, y.unsqueeze(1))
+                        else:
+                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                            
                         valid_loss.append(loss.item())
                         valid_accs.append(acc)
                 
@@ -383,13 +419,21 @@ class TrainingAlgo:
                         x, y = batch
                         
                         logits = model(x)
-                        loss = self.criterion(logits, y.to(torch.long))
+                        
+                        if self.binary:
+                            loss = self.criterion(logits, y.unsqueeze(1))
+                        else:
+                            loss = self.criterion(logits, y.to(torch.long))
                         
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
                         
-                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        if self.binary:
+                            acc = self._binary_acc(logits, y.unsqueeze(1))
+                        else:
+                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                            
                         train_loss.append(loss.item())
                         train_accs.append(acc)
                         
@@ -422,7 +466,11 @@ class TrainingAlgo:
                     with torch.no_grad():
                         logits = model(x)
                         
-                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        if self.binary:
+                            acc = self._binary_acc(logits, y.unsqueeze(1))
+                        else:
+                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                            
                         valid_loss.append(loss.item())
                         valid_accs.append(acc)
                 
@@ -457,3 +505,39 @@ class TrainingAlgo:
         acc = correct_result_sum / y_true.shape[0]
         
         return acc
+
+
+def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=None, binary=True):
+        
+    model.eval()
+    valid_loss = []
+    
+    for i, batch in enumerate(train_loader.dataset):
+        x, y = batch[0].view(-1, 12), batch[1].view(-1)
+        
+        with torch.no_grad():
+            logits = model(x.to(device))
+            
+            if binary:
+                loss = criterion(logits, y.to(device).unsqueeze(1))
+            else:
+                loss = criterion(logits, y.to(device))
+                
+            valid_loss.append((i, loss.item()))
+    
+    picked_loss = []
+    # obtaining_LTS
+    if type(n) == float:
+        for index, item in enumerate(valid_loss):
+            if item < n:
+                picked_loss.append((index, item))
+                
+    # selecting_LTS
+    if type(n) == int:
+        valid_loss.sort(key=lambda x: x[1])
+        picked_loss = valid_loss[:n]
+    
+    picked_index = [i for i, item in valid_loss]
+    n_data_loader = LTS_dataloader(train_loader.dataset, picked_index, train_loader.batch_size)
+    
+    return n_data_loader
