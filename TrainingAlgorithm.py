@@ -537,7 +537,7 @@ def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=Non
         valid_loss.sort(key=lambda x: x[1])
         picked_loss = valid_loss[:n]
     
-    picked_index = [i for i, item in valid_loss]
+    picked_index = [i for i, _ in valid_loss]
     n_data_loader = LTS_dataloader(train_loader.dataset, picked_index, train_loader.batch_size)
     
-    return n_data_loader
+    return n_data_loader, len(picked_index)
