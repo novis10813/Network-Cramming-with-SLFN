@@ -5,16 +5,16 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader, Subset
 from torch.utils.data.sampler import SubsetRandomSampler
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
 
 class CustomDataset(Dataset):
     
-    def __init__(self, filepath, device) -> None:
+    def __init__(self, data, device) -> None:
         
         # load csv data
-        data = pd.read_csv(filepath, header=None)
-        X = data.iloc[:, :-1].values
-        y = data.iloc[:, -1].values
+        X = data.iloc[:, 1:].values
+        y = data.iloc[:, 0].values
         
         # feature scaling
         sc = StandardScaler()
@@ -32,21 +32,18 @@ class CustomDataset(Dataset):
 
 
 def create_dataloader(datapath='train_all_0.csv', batch_size=None, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
-    dataset = CustomDataset(datapath, device)
-
-    # create data indices for train val split
-    data_size = len(dataset)
-    indices = list(range(data_size))
-    split = int(np.floor(0.2 * data_size))
-    np.random.shuffle(indices)
-    train_indices, val_indices = indices[split:], indices[:split]
-
-    train_sampler = SubsetRandomSampler(train_indices)
-    val_sampler = SubsetRandomSampler(val_indices)
+    
+    # read the data
+    data = pd.read_csv(datapath, header=None)
+    
+    # split the data and create dataset
+    train_data, valid_data = train_test_split(data, test_size=0.2)
+    train_dataset = CustomDataset(train_data, device)
+    valid_dataset = CustomDataset(valid_data, device)
 
     # create data loader
-    train_loader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
-    val_loader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size)
+    val_loader = DataLoader(valid_dataset, batch_size=batch_size)
     
     return train_loader, val_loader
 

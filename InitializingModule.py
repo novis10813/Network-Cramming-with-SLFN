@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import TwoLayerNN, LinearRegression
+from model import TwoLayerNN, LinearRegression, Autoencoder
 
 
 class InitModel:
@@ -11,13 +11,15 @@ class InitModel:
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.device = device
+        self.dropout = dropout
+        self.batch_norm = batch_norm
         self.model = TwoLayerNN(input_size, hidden_size, output_size, dropout=dropout, batch_norm=batch_norm)
     
     def init_module_1_ReLU_LR(self, train_loader):
         if self.hidden_size != 1:
             raise BaseException('hidden_size should be 1')
         
-        linear_model, loss = self._train_linear(train_loader)
+        linear_model, loss = self._train(train_loader, 'linear')
         new_weight = linear_model.linear.weight.data
         new_layer_bias = linear_model.linear.bias.data
         new_output_bias = torch.tensor([[loss]], dtype=torch.float32)
@@ -37,10 +39,23 @@ class InitModel:
         self.model.layer_out.bias.data.zero_()
         
         return self.model.to(self.device)
+    
+    def init_module_multi_ReLU_AE(self, train_loader):
         
-    def _train_linear(self, train_loader):
+        ae_model, _ = self._train(train_loader, 'autoencoder')
+        weight_tuned_model = ae_model.encoder
         
-        model = LinearRegression(12, 1).to(self.device)
+        return weight_tuned_model
+        
+    def _train(self, train_loader, types):
+        assert types in ['linear', 'autoencoder']
+        
+        if types == 'linear':
+            model = LinearRegression(self.input_size, 1).to(self.device)
+        
+        else:
+            model = Autoencoder(self.input_size, self.hidden_size, self.output_size, self.dropout, self.batch_norm).to(self.device)
+            
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.MSELoss()
         
@@ -56,7 +71,12 @@ class InitModel:
                 optimizer.zero_grad()
                 y_pred = model(x.to(self.device))
                 
-                loss = criterion(y_pred.squeeze(), y.to(self.device))
+                if types == 'linear':
+                    loss = criterion(y_pred.squeeze(), y.to(self.device))
+                    
+                elif types == 'autoencoder':
+                    loss = criterion(y_pred, x)
+                    
                 loss.backward()
                 optimizer.step()
                 

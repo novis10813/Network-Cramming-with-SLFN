@@ -1,18 +1,20 @@
+import copy
 import torch
 import itertools
 
 from DataPreprocess import LTS_dataloader
 
+
+def binary_acc(y_pred, y_true):
+    y_pred_tag = torch.round(torch.sigmoid(y_pred))
+    correct_result_sum = (y_pred_tag == y_true).sum().float()
+    acc = correct_result_sum / y_true.shape[0]
+    
+    return acc
+
+
 # Basic training pipeline
-def train(train_loader=None, val_loader=None, model=None, epochs=None, device=None, criterion=None, optimizer=None, binary=True):
-    
-    def binary_acc(y_pred, y_true):
-        y_pred_tag = torch.round(torch.sigmoid(y_pred))
-        correct_result_sum = (y_pred_tag == y_true).sum().float()
-        acc = correct_result_sum / y_true.shape[0]
-        
-        return acc
-    
+def train(train_loader=None, val_loader=None, model=None, epochs=None, device=None, criterion=None, optimizer=None, l1_lambda=None, l2_lambda=None, binary=True):
     
     for epoch in range(epochs):
         
@@ -33,14 +35,21 @@ def train(train_loader=None, val_loader=None, model=None, epochs=None, device=No
                 loss = criterion(logits, y.to(device))
                 acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
             
+            # L1 regularization with normalized l1
+            if l1_lambda is not None:
+                L1_regularization = sum(p.abs().sum() for p in model.parameters())
+                param_num = sum(p.numel() for p in model.parameters())
+                loss += (l1_lambda / param_num) * L1_regularization
+                        
+            # L2 regularization with normalized l2
+            if l2_lambda is not None:
+                L2_regularization = sum(p.pow(2.0).sum() for p in model.parameters())
+                param_num = sum(p.numel() for p in model.parameters())
+                loss += (l2_lambda / param_num) * L2_regularization
+            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            # if binary:
-            #     acc = binary_acc(logits, y.to(device).unsqueeze(1))
-            # else:
-            #     acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
             
             train_loss.append(loss.item())
             train_accs.append(acc)
@@ -75,261 +84,83 @@ def train(train_loader=None, val_loader=None, model=None, epochs=None, device=No
     return model
 
 
-# Universal training process
-def universal_training(train_loader=None,
-                       val_loader=None,
-                       model=None,
-                       epochs=None,
-                       criterion=None,
-                       optimizer=None,
-                       device=None,
-                       loss_threshold=0.5,
-                       eta_threshold=0.008,
-                       l1_lambda=None,
-                       l2_lambda=None,
-                       model_type='regularizing'):
+def multiclass_regularization(train_loader=None,
+                              val_loader=None,
+                              epochs:int=None,
+                              model:torch.nn.Module=None,
+                              optimizer:torch.optim=None,
+                              criterion=None,
+                              l1_lambda:float=None,
+                              l2_lambda:float=None,
+                              loss_threshold:float=None,
+                              eta_threshold:float=None,
+                              binary:bool=True):
     '''
     Args:
-        train_loader: Pytorch trainloader object.
-        val_loader: Pytorch valloader object.
-        model: A neural network.
-        epochs: If None, it will not stop by the limitation of epoch, otherwise the training process will stop at your desired epoch.
-        criterion: Usually MSE loss.
-        optimizer: Training optimizer.
-        device: cpu or cuda
-        loss_threshold: stopping criteria for training loss.
-        eta_threshold: stopping criteria for learning rate.
-        l1_lambda: if None, it won't apply l1 regularization to the model.
-        l2_lambda: if None, it won't apply l2 regularization to the model.
-        model_type: decide the model type is 'regularizing' or 'weight_tuning'.
+    epochs: If None, it will not stop by the limitation of epoch, otherwise the training process will stop at your desired epoch.
+    model: A neural network.
+    optimizer: Training optimizer.
+    loss_threshold: stopping criteria for training loss.
+    eta_threshold: stopping criteria for learning rate.
+    l1_lambda: if None, it won't apply l1 regularization to the model.
+    l2_lambda: if None, it won't apply l2 regularization to the model.  
     '''
     
-    previous_train_loss = 10000    
-
-    for epoch in itertools.count():
-        
-        model.train()
-        
-        previous_model_params = model.state_dict()
-        stop_training = False
-        
-        # The mechanism of identifying the neighborhood of an undesired attractor
-        while optimizer.param_groups[0]['lr'] > eta_threshold:
+    previous_train_loss = 10000
+    print('--------initializing regularization--------')
+    try:
+        for epoch in itertools.count():
             
-            train_loss = []
-            train_accs = []
+            model.train()
             
-            for batch in train_loader:
-                
-                x, y = batch
-                
-                logits = model(x.to(device))
-                loss = criterion(logits, y.to(device))
-                
-                # L1 regularization with normalized l1
-                if l1_lambda is not None:
-                    L1_regularization = sum(p.abs().sum() for p in model.parameters())
-                    param_num = sum(p.numel() for p in model.parameters())
-                    loss += (l1_lambda / param_num) * L1_regularization
-                
-                # L2 regularization with normalized l2
-                if l2_lambda is not None:
-                    L2_regularization = sum(p.pow(2.0).sum() for p in model.parameters())
-                    param_num = sum(p.numel() for p in model.parameters())
-                    loss += (l2_lambda / param_num) * L2_regularization
-                
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                
-                acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
-                train_loss.append(loss.item())
-                train_accs.append(acc)
+            previous_model_params = model.state_dict()
+            stop_training = False
             
-            max_train_loss = max(train_loss)
-            train_loss = sum(train_loss) / len(train_loss)
-            train_acc = sum(train_accs) / len(train_accs)
-            
-            if model_type == 'regularizing':
-                if train_loss <= previous_train_loss:
-                    if max_train_loss < loss_threshold:
-                        optimizer.param_groups[0]['lr'] *= 1.2
-                        previous_train_loss = train_loss
-                        break
+            while True:
+                
+                train_loss = []
+                train_accs = []
+                
+                for batch in train_loader:
                     
+                    x, y = batch
+                    
+                    logits = model(x)
+                    
+                    if binary:
+                        loss = criterion(logits, y.unsqueeze(1))
                     else:
-                        model.load_state_dict(previous_model_params)
-                        stop_training = True
-                        SLFN = 'Acceptable'
-                        break
-            
-            elif model_type == 'weight_tuning':
-                if train_loss <= previous_train_loss:
-                    if max_train_loss < loss_threshold:
-                        optimizer.param_groups[0]['lr'] *= 1.2
-                        previous_train_loss = train_loss
-                        break
+                        loss = criterion(logits, y.to(torch.long))
                     
+                    # L1 regularization with normalized l1
+                    if l1_lambda is not None:
+                        L1_regularization = sum(p.abs().sum() for p in model.parameters())
+                        param_num = sum(p.numel() for p in model.parameters())
+                        loss += (l1_lambda / param_num) * L1_regularization
+                    
+                    # L2 regularization with normalized l2
+                    if l2_lambda is not None:
+                        L2_regularization = sum(p.pow(2.0).sum() for p in model.parameters())
+                        param_num = sum(p.numel() for p in model.parameters())
+                        loss += (l2_lambda / param_num) * L2_regularization
+                    
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    
+                    if binary:
+                        acc = binary_acc(logits, y.unsqueeze(1))
                     else:
-                        model.load_state_dict(previous_model_params)
-                        stop_training = True
-                        SLFN = 'Acceptable'
-                        break
-            
-            optimizer.param_groups[0]['lr'] *= 0.7
-            model.load_state_dict(previous_model_params)
-            
-        else:
-            # eta < threshold
-            stop_training = True
-            if model_type == 'regularizing':
-                model.load_state_dict(previous_model_params)
-                SLFN = 'Acceptable'
-            
-            elif model_type == 'weight_tuning':
-                SLFN = 'Unacceptable'
-        
-        # Use try and except to detect whether the eta_threshold is set too high initially
-        try:        
-            model.eval()
-            valid_loss = []
-            valid_accs = []
-            
-            for batch in val_loader:
-                imgs, labels = batch
+                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                    
+                    train_loss.append(loss.item())
+                    train_accs.append(acc)
                 
-                with torch.no_grad():
-                    logits = model(imgs.to(device))
-                    
-                    acc = (logits.argmax(dim=-1) == labels.to(device)).float().mean()
-                    valid_loss.append(loss.item())
-                    valid_accs.append(acc)
-            
-            valid_loss = sum(valid_loss) / len(valid_loss)
-            valid_acc = sum(valid_accs) / len(valid_accs)
-
-            if epochs is None:
-                print(f'[ {epoch+1} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
-            
-            else:
-                print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+                max_train_loss = max(train_loss)
+                train_loss = sum(train_loss) / len(train_loss)
+                train_acc = sum(train_accs) / len(train_accs)
                 
-                if epoch+1 == epochs:
-                    print(f'Already trained {epochs} epochs, acceptable')
-                    if model_type == 'regularizing':
-                        SLFN = 'Acceptable'
-                        return SLFN
-                    
-                    elif model_type == 'weight_tuning':
-                        SLFN = 'Unacceptable'
-                        return SLFN
-                    
-                    else:
-                        return 'weight_type_error'
-            
-        except UnboundLocalError:
-            print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
-            return 'Error'
-        
-        # stopping criterion
-        if stop_training:
-            print('Restore previous model weights, stop training.')
-            return SLFN
-
-
-class TrainingAlgo:
-    def __init__(self,
-                 train_loader=None,
-                 val_loader=None,
-                 criterion=None,
-                 device=None,
-                 binary:bool=True):
-        '''
-        Args:
-            train_loader: Pytorch trainloader object.
-            val_loader: Pytorch valloader object.
-            epochs: If None, it will not stop by the limitation of epoch, otherwise the training process will stop at your desired epoch.
-            criterion: Usually MSE loss.
-        '''
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.criterion = criterion
-        self.device=device
-        self.binary = binary
-    
-    def multiclass_regularization(self,
-                                epochs:int=None,
-                                model:torch.nn.Module=None,
-                                optimizer:torch.optim=None,
-                                l1_lambda:float=None,
-                                l2_lambda:float=None,
-                                loss_threshold:float=None,
-                                eta_threshold:float=None):
-        '''
-        Args:
-        epochs: If None, it will not stop by the limitation of epoch, otherwise the training process will stop at your desired epoch.
-        model: A neural network.
-        optimizer: Training optimizer.
-        loss_threshold: stopping criteria for training loss.
-        eta_threshold: stopping criteria for learning rate.
-        l1_lambda: if None, it won't apply l1 regularization to the model.
-        l2_lambda: if None, it won't apply l2 regularization to the model.  
-        '''
-        model.to(self.device)
-        previous_train_loss = 10000
-        print('--------initializing regularization--------')
-        try:
-            for epoch in itertools.count():
-                
-                model.train()
-                
-                previous_model_params = model.state_dict()
-                stop_training = False
-                
-                while True:
-                    
-                    train_loss = []
-                    train_accs = []
-                    
-                    for batch in self.train_loader:
-                        
-                        x, y = batch
-                        
-                        logits = model(x)
-                        
-                        if self.binary:
-                            loss = self.criterion(logits, y.unsqueeze(1))
-                        else:
-                            loss = self.criterion(logits, y.to(torch.long))
-                        
-                        # L1 regularization with normalized l1
-                        if l1_lambda is not None:
-                            L1_regularization = sum(p.abs().sum() for p in model.parameters())
-                            param_num = sum(p.numel() for p in model.parameters())
-                            loss += (l1_lambda / param_num) * L1_regularization
-                        
-                        # L2 regularization with normalized l2
-                        if l2_lambda is not None:
-                            L2_regularization = sum(p.pow(2.0).sum() for p in model.parameters())
-                            param_num = sum(p.numel() for p in model.parameters())
-                            loss += (l2_lambda / param_num) * L2_regularization
-                        
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                        
-                        if self.binary:
-                            acc = self._binary_acc(logits, y.unsqueeze(1))
-                        else:
-                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
-                        
-                        train_loss.append(loss.item())
-                        train_accs.append(acc)
-                    
-                    max_train_loss = max(train_loss)
-                    train_loss = sum(train_loss) / len(train_loss)
-                    train_acc = sum(train_accs) / len(train_accs)
-                    
+                if eta_threshold is not None:
                     if train_loss <= previous_train_loss:
                         if max_train_loss < loss_threshold:
                             optimizer.param_groups[0]['lr'] *= 1.2
@@ -352,97 +183,104 @@ class TrainingAlgo:
                         print('learning <= threshold, stop training.')
                         break
                 
-                model.eval()
-                valid_loss = []
-                valid_accs = []
+                else:
+                    break
+            
+            model.eval()
+            valid_loss = []
+            valid_accs = []
+            
+            for batch in val_loader:
+                x, y = batch
                 
-                for batch in self.val_loader:
+                with torch.no_grad():
+                    logits = model(x)
+                    
+                    if binary:
+                        acc = binary_acc(logits, y.unsqueeze(1))
+                    else:
+                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        
+                    valid_loss.append(loss.item())
+                    valid_accs.append(acc)
+            
+            valid_loss = sum(valid_loss) / len(valid_loss)
+            valid_acc = sum(valid_accs) / len(valid_accs)
+
+            if epochs is None:
+                print(f'[ {epoch+1} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+            
+            else:
+                print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+                
+                if epoch+1 == epochs:
+                    print(f'Already trained {epochs} epochs, acceptable')
+                    return model
+            
+            if stop_training:
+                return model
+
+    except UnboundLocalError:
+        print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
+        return None
+
+  
+def multiclass_weight_tuning(train_loader=None,
+                             val_loader=None,
+                             epochs:int=None,
+                             model:torch.nn.Module=None,
+                             optimizer:torch.optim=None,
+                             criterion=None,
+                             loss_threshold:float=None,
+                             eta_threshold:float=None,
+                             binary=True):
+    
+    previous_train_loss = 10000
+    print('--------initializing weight tuning--------')
+    # Use try and except to detect whether the eta_threshold is set too high initially
+    try:
+        for epoch in itertools.count():
+            
+            model.train()
+            
+            previous_model_params = model.state_dict()
+            stop_training = False
+            
+            while True:
+                
+                train_loss = []
+                train_accs = []
+                
+                for batch in train_loader:
+                    
                     x, y = batch
                     
-                    with torch.no_grad():
-                        logits = model(x)
-                        
-                        if self.binary:
-                            acc = self._binary_acc(logits, y.unsqueeze(1))
-                        else:
-                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
-                            
-                        valid_loss.append(loss.item())
-                        valid_accs.append(acc)
-                
-                valid_loss = sum(valid_loss) / len(valid_loss)
-                valid_acc = sum(valid_accs) / len(valid_accs)
-
-                if epochs is None:
-                    print(f'[ {epoch+1} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
-                
-                else:
-                    print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+                    logits = model(x)
                     
-                    if epoch+1 == epochs:
-                        print(f'Already trained {epochs} epochs, acceptable')
-                        return model
-                
-                if stop_training:
-                    return model
-
-        except UnboundLocalError:
-            print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
-            return None
-        
-    def multiclass_weight_tuning(self,
-                                epochs:int=None,
-                                model:torch.nn.Module=None,
-                                optimizer:torch.optim=None,
-                                loss_threshold:float=None,
-                                eta_threshold:float=None):
-        
-        model.to(self.device)
-        previous_train_loss = 10000
-        print('--------initializing weight tuning--------')
-        # Use try and except to detect whether the eta_threshold is set too high initially
-        try:
-            for epoch in itertools.count():
-                
-                model.train()
-                
-                previous_model_params = model.state_dict()
-                stop_training = False
-                
-                while True:
+                    if binary:
+                        loss = criterion(logits, y.unsqueeze(1))
+                    else:
+                        loss = criterion(logits, y.to(torch.long))
                     
-                    train_loss = []
-                    train_accs = []
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
                     
-                    for batch in self.train_loader:
+                    if binary:
+                        acc = binary_acc(logits, y.unsqueeze(1))
+                    else:
+                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
                         
-                        x, y = batch
-                        
-                        logits = model(x)
-                        
-                        if self.binary:
-                            loss = self.criterion(logits, y.unsqueeze(1))
-                        else:
-                            loss = self.criterion(logits, y.to(torch.long))
-                        
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                        
-                        if self.binary:
-                            acc = self._binary_acc(logits, y.unsqueeze(1))
-                        else:
-                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
-                            
-                        train_loss.append(loss.item())
-                        train_accs.append(acc)
-                        
-                    max_train_loss = max(train_loss)
-                    train_loss = sum(train_loss) / len(train_loss)
-                    train_acc = sum(train_accs) / len(train_accs)
+                    train_loss.append(loss.item())
+                    train_accs.append(acc)
                     
+                max_train_loss = max(train_loss)
+                train_loss = sum(train_loss) / len(train_loss)
+                train_acc = sum(train_accs) / len(train_accs)
+                
+                if eta_threshold is not None:
                     if train_loss < previous_train_loss:
-                        optimizer.param_groups[0]['lr'] *= 1.1
+                        optimizer.param_groups[0]['lr'] *= 1.2
                         previous_train_loss = train_loss
                         break
                     
@@ -455,63 +293,107 @@ class TrainingAlgo:
                         print('learning rate < threshold')
                         SLFN = 'Unacceptable'    
                         break
-                      
-                model.eval()
-                valid_loss = []
-                valid_accs = []
-                
-                for batch in self.val_loader:
-                    x, y = batch
-                    
-                    with torch.no_grad():
-                        logits = model(x)
-                        
-                        if self.binary:
-                            acc = self._binary_acc(logits, y.unsqueeze(1))
-                        else:
-                            acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
-                            
-                        valid_loss.append(loss.item())
-                        valid_accs.append(acc)
-                
-                valid_loss = sum(valid_loss) / len(valid_loss)
-                valid_acc = sum(valid_accs) / len(valid_accs)
-
-                if epochs is None:
-                    print(f'[ {epoch+1} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
                 
                 else:
-                    print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+                    break
+                
+            model.eval()
+            valid_loss = []
+            valid_accs = []
+            
+            for batch in val_loader:
+                x, y = batch
+                
+                with torch.no_grad():
+                    logits = model(x)
                     
-                    if epoch+1 == epochs:
-                        print(f'Already trained {epochs} epochs, unacceptable')
-                        SLFN = 'Unacceptable'
-                        return SLFN, model
+                    if binary:
+                        acc = binary_acc(logits, y.unsqueeze(1))
+                    else:
+                        acc = (logits.argmax(dim=-1) == y.to(torch.long)).float().mean()
+                        
+                    valid_loss.append(loss.item())
+                    valid_accs.append(acc)
+            
+            valid_loss = sum(valid_loss) / len(valid_loss)
+            valid_acc = sum(valid_accs) / len(valid_accs)
+
+            if epochs is None:
+                print(f'[ {epoch+1} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
+            
+            else:
+                print(f'[ {epoch+1}/{epochs} ] | train_loss = {train_loss:.5f}, train_acc = {train_acc:.5f}, val_loss = {valid_loss:.5f}, val_acc = {valid_acc:.5f}')
                 
-                if stop_training:
+                if epoch+1 >= epochs:
+                    print(f'Already trained {epochs} epochs, unacceptable')
+                    SLFN = 'Unacceptable'
                     return SLFN, model
-                
+            
+            if stop_training:
+                return SLFN, model
+            
+            if loss_threshold is not None:
                 if max_train_loss < loss_threshold:
                     SLFN = 'Acceptable'
                     return SLFN, model
-                
-        except UnboundLocalError:
-                print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
-                return 'Error', None
-    
-    def _binary_acc(self, y_pred, y_true):
-        y_pred_tag = torch.round(torch.sigmoid(y_pred))
-        correct_result_sum = (y_pred_tag == y_true).sum().float()
-        acc = correct_result_sum / y_true.shape[0]
+            
+    except UnboundLocalError:
+            print('Your eta_threshold is setting higher than your learning rate. Reset it with lower one!')
+            return 'Error', None
+
+
+def reorganize_module(model=None,
+                      train_loader=None,
+                      val_loader=None,
+                      criterion=None,
+                      reg_params:dict=None,
+                      weight_params:dict=None,
+                      l1_lambda=0.001,
+                      l2_lambda=0.001,
+                      k=1,
+                      p=50):
+    while not k>p:
         
-        return acc
+        model = multiclass_regularization(train_loader=train_loader,
+                                          val_loader=val_loader,
+                                          epochs=reg_params['epochs'],
+                                          model=model,
+                                          optimizer=reg_params['optimizer'],
+                                          criterion=criterion,
+                                          l1_lambda=l1_lambda,
+                                          l2_lambda=l2_lambda,
+                                          loss_threshold=reg_params['loss_threshold'],
+                                          eta_threshold=reg_params['eta_threshold'])
+        
+        saved_model = copy.deepcopy(model)
+        
+        prune_index = model.layer_1.weight.sum(1).argmin()
+        model.del_neuron(index=prune_index)
+        
+        situation, model = multiclass_weight_tuning(train_loader=train_loader,
+                                                    val_loader=val_loader,
+                                                    epochs=weight_params['epochs'],
+                                                    model=model,
+                                                    optimizer=weight_params['optimizer'],
+                                                    criterion=criterion,
+                                                    loss_threshold=weight_params['loss_threshold'],
+                                                    eta_threshold=weight_params['eta_threshold'])
+        
+        if situation == 'Unacceptable':
+            model = saved_model
+            k +=1
+            
+        elif situation == 'Acceptable':
+            p-= 1
+            
+    return model
 
 
 def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=None, binary=True):
-        
+    
     model.eval()
     valid_loss = []
-    
+
     for i, batch in enumerate(train_loader.dataset):
         x, y = batch[0].view(-1, 12), batch[1].view(-1)
         
@@ -524,20 +406,20 @@ def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=Non
                 loss = criterion(logits, y.to(device))
                 
             valid_loss.append((i, loss.item()))
-    
+
     picked_loss = []
     # obtaining_LTS
-    if type(n) == float:
+    if isinstance(n, float):
         for index, item in enumerate(valid_loss):
             if item < n:
                 picked_loss.append((index, item))
                 
     # selecting_LTS
-    if type(n) == int:
+    if isinstance(n, int):
         valid_loss.sort(key=lambda x: x[1])
         picked_loss = valid_loss[:n]
-    
+
     picked_index = [i for i, _ in valid_loss]
     n_data_loader = LTS_dataloader(train_loader.dataset, picked_index, train_loader.batch_size)
-    
+
     return n_data_loader, len(picked_index)
