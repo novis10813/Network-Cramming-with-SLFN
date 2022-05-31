@@ -31,13 +31,13 @@ class CustomDataset(Dataset):
         return self.X[index], self.y[index]
 
 
-def create_dataloader(datapath='train_all_0.csv', batch_size=None, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+def create_dataloader(datapath='train_all_0.csv', batch_size=None, random_state=87, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     
     # read the data
     data = pd.read_csv(datapath, header=None)
     
     # split the data and create dataset
-    train_data, valid_data = train_test_split(data, test_size=0.2)
+    train_data, valid_data = train_test_split(data, test_size=0.2, random_state=random_state)
     train_dataset = CustomDataset(train_data, device)
     valid_dataset = CustomDataset(valid_data, device)
 

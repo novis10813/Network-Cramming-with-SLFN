@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 
 
 class TwoLayerNN(nn.Module):
@@ -28,7 +29,7 @@ class TwoLayerNN(nn.Module):
             
         return x
     
-    def del_neuron(self, index):
+    def del_neuron(self, index:int):
         # take a copy of the current weights of layer_out
         current_layer_out = [i.data for i in self.layer_out.weight]
         current_layer_out = torch.stack(current_layer_out)
@@ -50,16 +51,21 @@ class TwoLayerNN(nn.Module):
         if self.batch_norm:
             self.bn = nn.BatchNorm1d(layer_1_new_weight.shape[0])
     
-    def add_neuron(self, train_loader, index):
+    def add_neuron(self, train_loader:DataLoader, index:int):
+        '''
+        Index is the wrong class's index, one at a time
+        '''
+        assert len(train_loader.dataset) >= index
+        
         # cut output neuron weight for the first layer
         current_weight_1 = self.layer_1.weight.data
         current_bias_1 = self.layer_1.bias.data
         
         new_neuron_weight = train_loader.dataset[index][0].unsqueeze(0).detach().cpu()
-        new_neuron_bias = torch.tensor([1 - len(train_loader.dataset[0][index])], dtype=torch.float32)
+        new_neuron_bias = torch.tensor([1 - len(train_loader.dataset[index][0])], dtype=torch.float32)
         
-        new_weights_1 = torch.cat([current_weight_1, new_neuron_weight])
-        new_bias_1 = torch.cat([current_bias_1, new_neuron_bias])
+        new_weights_1 = torch.cat([current_weight_1.detach().cpu(), new_neuron_weight])
+        new_bias_1 = torch.cat([current_bias_1.detach().cpu(), new_neuron_bias])
         
         self.layer_1 = nn.Linear(new_weights_1.shape[1], new_weights_1.shape[0])
         self.layer_1.weight.data = new_weights_1.clone().detach().requires_grad_(True)
@@ -70,9 +76,9 @@ class TwoLayerNN(nn.Module):
         current_bias_out = self.layer_out.bias.data
         
         y = train_loader.dataset[index][1].unsqueeze(0).detach().cpu()
-        new_neuron_out = y - current_bias_out - torch.relu(current_weight_out).sum().detach().cpu()
+        new_neuron_out = y - current_bias_out.detach().cpu() - torch.relu(current_weight_out).sum().detach().cpu()
         
-        new_weights_out = torch.cat([current_weight_out, new_neuron_out])
+        new_weights_out = torch.cat([current_weight_out.detach().cpu(), new_neuron_out.unsqueeze(1)], dim=1)
         self.layer_out = nn.Linear(new_weights_out.shape[1], new_weights_out.shape[0])
         self.layer_out.weight.data = new_weights_out.clone().detach().requires_grad_(True)
         self.layer_out.bias.data = current_bias_out.clone().detach().requires_grad_(True)

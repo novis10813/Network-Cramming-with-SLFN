@@ -107,7 +107,6 @@ def multiclass_regularization(train_loader=None,
     '''
     
     previous_train_loss = 10000
-    print('--------initializing regularization--------')
     try:
         for epoch in itertools.count():
             
@@ -236,7 +235,6 @@ def multiclass_weight_tuning(train_loader=None,
                              binary=True):
     
     previous_train_loss = 10000
-    print('--------initializing weight tuning--------')
     # Use try and except to detect whether the eta_threshold is set too high initially
     try:
         for epoch in itertools.count():
@@ -395,7 +393,7 @@ def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=Non
     valid_loss = []
 
     for i, batch in enumerate(train_loader.dataset):
-        x, y = batch[0].view(-1, 12), batch[1].view(-1)
+        x, y = batch[0].unsqueeze(0), batch[1].view(-1)
         
         with torch.no_grad():
             logits = model(x.to(device))
@@ -423,3 +421,48 @@ def LTS_module(train_loader=None, model=None, criterion=None, n=None, device=Non
     n_data_loader = LTS_dataloader(train_loader.dataset, picked_index, train_loader.batch_size)
 
     return n_data_loader, len(picked_index)
+
+
+def find_cram_index(model, data_loader, criterion, device):
+    '''
+    This function will return the index of wrong prediction data with biggest loss
+    '''
+    
+    model.to(device).eval()
+    mem = []
+    with torch.no_grad():
+        for i, data in enumerate(data_loader.dataset):
+            x, y = data[0].unsqueeze(0), data[1]
+            y_pred = torch.round(torch.sigmoid(model(x))).squeeze()
+            loss = criterion(y, y_pred)
+            
+            if y_pred != y:
+                mem.append((i, loss.item()))
+                
+    return max(mem, key=lambda mem: mem[1])[0]
+
+
+def evaluate(train_loader=None, model=None, criterion=None, device=None, binary=True):
+    
+    model.to(device).eval()
+    valid_loss = []
+    valid_accs = []
+
+    for i, batch in enumerate(train_loader.dataset):
+        x, y = batch[0].unsqueeze(0), batch[1].view(-1)
+        
+        with torch.no_grad():
+            logits = model(x.to(device))
+            
+            if binary:
+                loss = criterion(logits, y.to(device).unsqueeze(1))
+                acc = binary_acc(logits, y.to(device).unsqueeze(1))
+            else:
+                loss = criterion(logits, y.to(device))
+                acc = (logits.argmax(dim=-1) == y.to(device)).float().mean()
+                
+            valid_loss.append((loss.item()))
+            valid_accs.append(acc)
+    
+    # print(f'loss:{sum(valid_loss) / len(valid_loss)} | acc:{sum(valid_accs) / len(valid_accs)}')
+    return sum(valid_loss) / len(valid_loss), sum(valid_accs) / len(valid_accs)
