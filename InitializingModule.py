@@ -59,7 +59,7 @@ class InitModel:
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.MSELoss()
         
-        for _ in range(100):
+        for _ in range(10):
                 
             model.train()
             train_loss = []
@@ -69,10 +69,10 @@ class InitModel:
                 x, y = batch
                 
                 optimizer.zero_grad()
-                y_pred = model(x.to(self.device))
+                y_pred = model(x)
                 
                 if types == 'linear':
-                    loss = criterion(y_pred.squeeze(), y.to(self.device))
+                    loss = criterion(y_pred, y)
                     
                 elif types == 'autoencoder':
                     loss = criterion(y_pred, x)

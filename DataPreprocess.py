@@ -3,7 +3,6 @@ import torch
 import numpy as np
 
 from torch.utils.data import Dataset, DataLoader, Subset
-from torch.utils.data.sampler import SubsetRandomSampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
@@ -20,18 +19,29 @@ class CustomDataset(Dataset):
         sc = StandardScaler()
         X = sc.fit_transform(X)
         
+        
         # convert to tensors
-        self.X = torch.tensor(X, dtype=torch.float32, device=device)
-        self.y = torch.tensor(y, dtype=torch.float32, device=device)
+        self.num_class = len(set(y))
+        
+        # binary and real number
+        if self.num_class <= 2:
+            self.X = torch.tensor(X, dtype=torch.float32, device=device)
+            self.y = torch.tensor(y, dtype=torch.float32, device=device).view(-1)
+            # self.y = torch.tensor(y, dtype=torch.float32, device=device)
+            
+        # multi
+        elif self.num_class > 2:
+            self.X = torch.tensor(X, dtype=torch.float32, device=device)
+            self.y = torch.tensor(y, dtype=torch.long, device=device)
     
     def __len__(self):
         return len(self.y)
     
     def __getitem__(self, index):
-        return self.X[index], self.y[index]
+        return self.X[index], self.y[index].view(-1)
 
 
-def create_dataloader(datapath='train_all_0.csv', batch_size=None, random_state=87, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+def create_dataloader(datapath='train_all_0.csv', batch_size=128, random_state=87, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     
     # read the data
     data = pd.read_csv(datapath, header=None)

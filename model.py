@@ -78,7 +78,7 @@ class TwoLayerNN(nn.Module):
         y = train_loader.dataset[index][1].unsqueeze(0).detach().cpu()
         new_neuron_out = y - current_bias_out.detach().cpu() - torch.relu(current_weight_out).sum().detach().cpu()
         
-        new_weights_out = torch.cat([current_weight_out.detach().cpu(), new_neuron_out.unsqueeze(1)], dim=1)
+        new_weights_out = torch.cat([current_weight_out.detach().cpu(), new_neuron_out], dim=1)
         self.layer_out = nn.Linear(new_weights_out.shape[1], new_weights_out.shape[0])
         self.layer_out.weight.data = new_weights_out.clone().detach().requires_grad_(True)
         self.layer_out.bias.data = current_bias_out.clone().detach().requires_grad_(True)
