@@ -331,6 +331,7 @@ def multiclass_weight_tuning(train_loader=None,
                 return SLFN, model
             
             if loss_threshold is not None:
+                # if max_train_loss < loss_threshold:
                 if max_train_loss < loss_threshold:
                     SLFN = 'Acceptable'
                     return SLFN, model
