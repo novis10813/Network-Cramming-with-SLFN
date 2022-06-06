@@ -14,7 +14,7 @@ from utils import BinaryFocalLossWithLogits
 
 
 # parameters
-train_name = 'reorganize_50'
+train_name = 'min_cram_max_prune'
 datapath = 'data\SPECT_data.txt'
 num_data = 20
 hidden_size = 5
@@ -26,7 +26,7 @@ learning_rate = 5e-4
 eta_threshold = 1e-6
 loss_threshold = 0.4
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-p = 50 # 10
+p = 10
 
 # initialize logging
 formatter = logging.Formatter(r'"%(asctime)s",%(message)s')

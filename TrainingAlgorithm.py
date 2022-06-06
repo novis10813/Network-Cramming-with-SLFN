@@ -375,7 +375,7 @@ def reorganize_module(model:TwoLayerNN=None,
         saved_model = copy.deepcopy(model)
         
         if model.layer_out.weight.data.numel() > 1:
-            prune_index = model.layer_1.weight.sum(1).argmin()
+            prune_index = model.layer_1.weight.sum(1).argmax()
             model.del_neuron(index=prune_index)
         
         situation, model = multiclass_weight_tuning(train_loader=train_loader,
@@ -451,7 +451,7 @@ def find_cram_index(model, data_loader, criterion):
             if y_pred != y:
                 mem.append((i, loss.item()))
                 
-    return max(mem, key=lambda mem: mem[1])[0]
+    return min(mem, key=lambda mem: mem[1])[0]
 
 
 def evaluate(train_loader=None, model=None, criterion=None, binary=True):
