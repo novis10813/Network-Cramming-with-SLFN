@@ -8,7 +8,7 @@ class TwoLayerNN(nn.Module):
         super(TwoLayerNN, self).__init__()
         self.output_size = output_size
         self.batch_norm = batch_norm
-        self.layer_1 = nn.Linear(input_size, hidden_size) 
+        self.layer_1 = nn.Linear(input_size, hidden_size)
         self.layer_out = nn.Linear(hidden_size, output_size)
         
         if dropout:
