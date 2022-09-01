@@ -2,9 +2,9 @@ import copy
 import torch
 import itertools
 
-from DataPreprocess import LTS_dataloader
-from utils import print_info
-from model import TwoLayerNN
+from src.DataPreprocess import LTS_dataloader
+from src.utils import print_info
+from src.model import TwoLayerNN
 
 def binary_acc(y_pred, y_true):
     y_pred_tag = torch.round(torch.sigmoid(y_pred))

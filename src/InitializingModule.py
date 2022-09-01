@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import TwoLayerNN, LinearRegression, Autoencoder
+from src.model import TwoLayerNN, LinearRegression, Autoencoder
 
 
 class InitModel:
